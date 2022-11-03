@@ -28,7 +28,8 @@ internal class RetryManager : IRetryManager
     public T Run<T>(Func<RetryContext, T> callback)
     {
         Task? waitForIt = default;
-        var retryContext = new RetryContext(0, default, default);
+        var started = DateTime.Now;
+        var retryContext = new RetryContext(0, DateTime.Now, default, default);
         while (true)
         {
             try
@@ -38,7 +39,7 @@ internal class RetryManager : IRetryManager
             }
             catch (Exception e)
             {
-                retryContext = new RetryContext(retryContext.Attempts + 1, DateTime.Now, e);
+                retryContext = new RetryContext(retryContext.Attempts + 1, started, DateTime.Now, e);
                 if (!Detectors.Any(x => x.IsTransient(e))) throw;
                 if (!Orchestrator.ShouldWeTryAgain(retryContext)) throw;
                 waitForIt = Orchestrator.GetPrerequisiteForNextTry(retryContext);
@@ -57,8 +58,9 @@ internal class RetryManager : IRetryManager
 
     public async Task<T> RunAsync<T>(Func<RetryContext, Task<T>> callback)
     {
+        var started = DateTime.Now;
         Task? waitForIt = default;
-        var retryContext = new RetryContext(0, default, default);
+        var retryContext = new RetryContext(0, started, default, default);
         while (true)
         {
             try
@@ -68,9 +70,16 @@ internal class RetryManager : IRetryManager
             }
             catch (Exception e)
             {
-                retryContext = new RetryContext(retryContext.Attempts + 1, DateTime.Now, e);
-                if (!Detectors.Any(x => x.IsTransient(e))) throw;
-                if (!Orchestrator.ShouldWeTryAgain(retryContext)) throw;
+                retryContext = new RetryContext(retryContext.Attempts + 1, started, DateTime.Now, e);
+                if (!Detectors.Any(x => x.IsTransient(e)))
+                {
+                    throw;
+                }
+
+                if (!Orchestrator.ShouldWeTryAgain(retryContext))
+                {
+                    throw;
+                }
                 waitForIt = Orchestrator.GetPrerequisiteForNextTry(retryContext);
             }
         }

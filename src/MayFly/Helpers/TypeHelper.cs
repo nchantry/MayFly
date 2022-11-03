@@ -5,7 +5,7 @@ namespace MayFly.Helpers;
 
 public static class TypeHelper
 {
-    private static readonly ConcurrentDictionary<Type, Func<Type, IServiceProvider, object>> _typeCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<Type, IServiceProvider, object?>> _typeCache = new();
 
     public static T Create<T>()
     {
@@ -21,7 +21,7 @@ public static class TypeHelper
         return inst;
     }
 
-    public static T Create<T>(IServiceProvider serviceProvider, Action<T>? initializer = null)
+    public static T? Create<T>(IServiceProvider serviceProvider, Action<T>? initializer = null)
     {
         if (serviceProvider == null) throw new ArgumentNullException(nameof(serviceProvider));
 
@@ -40,7 +40,7 @@ public static class TypeHelper
         return default;
     }
 
-    private static Func<Type, IServiceProvider, object> GetTypeFactory<T>(Type implementationType)
+    private static Func<Type, IServiceProvider, object?> GetTypeFactory<T>(Type implementationType)
     {
         var factory = _typeCache.GetOrAdd(implementationType, (t, sp) =>
         {
@@ -53,18 +53,15 @@ public static class TypeHelper
             {
                 return Activator.CreateInstance(t)!;
             }
-            else
+
+            foreach (var ctor in constructors)
             {
-                foreach (var ctor in constructors)
+                var parameters = ctor.GetParameters().Select(p => sp.GetService(p.ParameterType)).ToArray();
+                if (parameters.All(pv => pv != null))
                 {
-                    var parameters = ctor.GetParameters().Select(p => sp.GetService(p.ParameterType)).ToArray();
-                    if (parameters.All(pv => pv != null))
-                    {
-                        return Activator.CreateInstance(t, parameters)!;
-                    }
+                    return Activator.CreateInstance(t, parameters)!;
                 }
             }
-
             return null;
         });
         return factory;

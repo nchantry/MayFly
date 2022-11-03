@@ -2,8 +2,7 @@ using MayFly.Contracts;
 
 namespace MayFly.Domain;
 
-public interface IProjection : IEventStreamSink
+public interface IProjection : IVersioned
 {
     Guid Id { get; }
-    Task ApplyAsync(IEvent @event);
 }

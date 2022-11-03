@@ -21,8 +21,22 @@ services:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
 
+  redis:
+    image: redis
+    container_name: redis
+    ports:
+      - 6372:6372
+
+  elasticsearch:
+    container_name: elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.5.0
+    ports:
+      - 9200:9200
+      - 9300:9300
+
   portainer:
     image: portainer/portainer-ce
+    container_name: portainer
     ports:
       - 9000:9000
     volumes:

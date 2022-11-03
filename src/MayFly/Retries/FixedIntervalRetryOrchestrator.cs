@@ -11,17 +11,10 @@ public class FixedIntervalRetryOrchestrator : IRetryOrchestrator
         _intervals = intervals;
     }
 
-    public bool ShouldWeTryAgain(RetryContext context)
-    {
-        return context.Attempts <= _intervals.Length;
-    }
+    public bool ShouldWeTryAgain(RetryContext context) => context.Attempts <= _intervals.Length;
 
     public Task GetPrerequisiteForNextTry(RetryContext context)
     {
-        if (context.Attempts <= _intervals.Length)
-        {
-            return Task.Delay(_intervals[context.Attempts - 1]);
-        }
-        return Task.CompletedTask;
+        return !ShouldWeTryAgain(context) ? Task.CompletedTask : Task.Delay(_intervals[context.Attempts - 1]);
     }
 }

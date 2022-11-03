@@ -150,18 +150,27 @@ public class RetryManagerTests
         var orchestrator = Substitute.For<IRetryOrchestrator>();
         
         detector.IsTransient(Arg.Any<Exception>()).Returns(true);
+        detector.IsTransient(Arg.Any<ApplicationException>()).Returns(false);
         orchestrator.ShouldWeTryAgain(Arg.Any<RetryContext>()).Returns(false);
         
         var manager = RetryFactory.Create().UseDetector(detector).UseOrchestrator(orchestrator).Build();
 
-        var act = () => manager.RunAsync(async (_) =>
+        var act1 = () => manager.RunAsync(async (_) =>
         {
             await Task.CompletedTask;
             throw new Exception();
         });
 
-        await act.Should().ThrowAsync<Exception>();
-        detector.Received(1).IsTransient(Arg.Any<Exception>());
+        var act2 = () => manager.RunAsync(async (_) =>
+        {
+            await Task.CompletedTask;
+            throw new ApplicationException();
+        });
+
+        await act1.Should().ThrowAsync<Exception>();
+        await act2.Should().ThrowAsync<ApplicationException>();
+        detector.Received(2).IsTransient(Arg.Any<Exception>());
+        detector.Received(1).IsTransient(Arg.Any<ApplicationException>());
         orchestrator.Received(1).ShouldWeTryAgain(Arg.Any<RetryContext>());
     }
 

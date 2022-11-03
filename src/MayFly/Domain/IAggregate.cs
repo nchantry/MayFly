@@ -2,17 +2,10 @@ using MayFly.Contracts;
 
 namespace MayFly.Domain;
 
-public interface IAggregate
+public interface IAggregate: IDisposable, IAsyncDisposable
 {
     Guid AggregateId { get; }
 
-    Task ApplyAsync(IEvent @event);
-    Task HandleAsync(ICommand @command);
-}
-
-public interface IAggregate<TRoot, TProjection> : IAggregate 
-    where TRoot : IEntity
-    where TProjection : IProjection
-{
-    TRoot Root { get; set; }
+    Task ApplyEventAsync(IEvent domainEvent);
+    Task HandleCommandAsync(ICommand @command);
 }

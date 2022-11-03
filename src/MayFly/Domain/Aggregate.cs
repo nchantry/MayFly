@@ -1,102 +1,67 @@
 using MayFly.Contracts;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Context;
 
 namespace MayFly.Domain;
 
-public abstract class Aggregate : IAggregate, IDisposable, IAsyncDisposable
+public abstract class Aggregate : IAggregate
 {
     private readonly IServiceProvider _serviceProvider;
     private readonly MessageLinker _messageLinker;
-    private readonly IDisposable _loggingContext;
+    private readonly IDisposable _disposable;
     private bool _isDisposed;
     
     protected ILogger Logger { get; }
 
     public Guid AggregateId { get; }
 
-    protected Aggregate(IServiceProvider serviceProvider, Guid aggregateId)
-    {
-        Logger = serviceProvider.GetRequiredService<ILogger<Aggregate>>();
-        _serviceProvider = serviceProvider;
-        _messageLinker = serviceProvider.GetRequiredService<MessageLinker>();
-        _loggingContext = Logger.BeginScope("{AggregateId}", aggregateId.ToString());
-    }
-    
-    public virtual Task ApplyAsync(IEvent @event)
-    {
-        return _messageLinker.ApplyAsync(_serviceProvider, this, @event);
-    }
-
-    public virtual Task HandleAsync(ICommand command)
-    {
-        return _messageLinker.ApplyAsync(_serviceProvider, this, command);
-    }
-
-
-    public virtual void Dispose()
-    {
-        if (!_isDisposed)
-        {
-            _loggingContext?.Dispose();
-            _isDisposed = true;
-        }
-    }
-
-    public virtual ValueTask DisposeAsync()
-    {
-        if (!_isDisposed)
-        {
-            _loggingContext?.Dispose();
-            _isDisposed = true;
-        }
-        return ValueTask.CompletedTask;
-    }
-}
-
-public abstract class Aggregate<TRoot, TProjection> : Aggregate, IAggregate<TRoot, TProjection> 
-    where TRoot : IEntity
-    where TProjection : IProjection
-{
-    public TRoot Root { get; set; }
-    public TProjection Projection { get; set; }
+    public Dictionary<Type, IProjection> Projections { get; } = new();
 
     public List<IEvent> Stream { get; } = new();
 
-    public IEvent [] PendingEvents { get; set; }
+    public IReadOnlyCollection<IEvent> PendingEvents { get; } = new List<IEvent>();
 
     public long LastPersistedVersion { get; set; }
 
     public long CurrentVersion { get; set; }
-
     
-    protected Aggregate(IServiceProvider serviceProvider, Guid rootId) : base(serviceProvider, rootId)
+    protected Aggregate(IServiceProvider serviceProvider, Guid aggregateId)
     {
-        
+        Logger = serviceProvider.GetRequiredService<ILogger>().ForContext(GetType());
+
+        _disposable = new DisposableCollection(
+            LogContext.PushProperty(nameof(AggregateId), AggregateId)
+        );
+
+        _serviceProvider = serviceProvider;
+        _messageLinker = serviceProvider.GetRequiredService<MessageLinker>();
     }
 
-    public override Task ApplyAsync(IEvent @event)
+    public void RegisterProjection<T>(T projection) where T : class, IProjection, new() => Projections[typeof(T)] = projection;
+
+    public void RegisterProjection<T>() where T : class, IProjection, new() => RegisterProjection(new T());
+
+    protected T? Projection<T>() => Projections.OfType<T>().FirstOrDefault();
+
+    public async Task LoadAsync(IProjectionSource source)
     {
-        Logger.LogDebug($"{nameof(ApplyAsync)}" + " {EventId} to {ProjectionType} Projection {ProjectionId}", 
-            @event.MessageId, typeof(TProjection).FullName, Projection.Id);
+        Logger.Debug($"{nameof(LoadAsync)}" + " is loading stream {AggregateId}", AggregateId);
         
-        return base.ApplyAsync(@event);
-    }
-
-    public override Task HandleAsync(ICommand command)
-    {
-        Logger.LogDebug($"{nameof(HandleAsync)}" + " {EventId} to {AggregateType} Aggregate {AggregateId}", 
-            @command.MessageId, GetType().FullName, AggregateId);
-
-        return base.HandleAsync(command);
+        await foreach (var @event in source.ReadAsync())
+        {
+            //RegisterProjection(@event);
+        }
     }
 
     public async Task LoadAsync(IEventStreamSource source)
     {
+        Logger.Debug($"{nameof(LoadAsync)}" + " is loading stream {AggregateId}", AggregateId);
+        
         await foreach (var @event in source.ReadAsync())
         {
             Stream.Add(@event);
-            await ApplyAsync(@event);
+            await ApplyEventAsync(@event);
         }
 
         CurrentVersion = LastPersistedVersion = Stream.Max(e => e.Version);
@@ -104,7 +69,58 @@ public abstract class Aggregate<TRoot, TProjection> : Aggregate, IAggregate<TRoo
 
     public async Task SaveAsync(IEventStreamSink sink)
     {
-        await sink.WriteAsync(PendingEvents.ToArray()).ConfigureAwait(false);
-        LastPersistedVersion = PendingEvents.Max(e => e.Version);
+        var pendingEvents = PendingEvents.ToArray();
+        var totalEvents = pendingEvents.Max();
+        var streamVersion = PendingEvents.Max(x => x.Version);
+
+        Logger.Debug(
+            $"{nameof(SaveAsync)}" + "is saving to aggregate {AggregateId} a total of {TotalEvents} events, ending in version {MaxVersion}",
+            AggregateId, totalEvents, streamVersion
+        );
+        
+        await sink.WriteAsync(pendingEvents).ConfigureAwait(false);
+        LastPersistedVersion = streamVersion;
+    }
+
+    public async Task ApplyEventAsync(IEvent domainEvent)
+    {
+        // Logger.Debug(
+        //     $"{nameof(ApplyAsync)}" + " {EventId} to {ProjectionType} Projection {ProjectionId}", 
+        //     domainEvent.MessageId, typeof(TProjection).FullName, State.Id
+        // );
+
+        foreach (var projection in Projections)
+        {
+            
+            await _messageLinker.ApplyAsync(_serviceProvider, projection, domainEvent).ConfigureAwait(false);
+        }
+    }
+
+    public Task HandleCommandAsync(ICommand command)
+    {
+        Logger.Debug(
+            $"{nameof(HandleCommandAsync)}" + " {EventId} to {AggregateType} Aggregate {AggregateId}", 
+            command.MessageId, GetType().FullName, AggregateId
+        );
+
+        return _messageLinker.ApplyAsync(_serviceProvider, this, command);
+    }
+
+    public virtual void Dispose()
+    {
+        if (_isDisposed) return;
+        
+        _disposable?.Dispose();
+        _isDisposed = true;
+    }
+
+    public virtual ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return ValueTask.CompletedTask;
+        
+        _disposable?.Dispose();
+        _isDisposed = true;
+        
+        return ValueTask.CompletedTask;
     }
 }

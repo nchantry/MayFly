@@ -1,3 +1,4 @@
+using System;
 using System.Threading.Tasks;
 using FluentAssertions;
 using MayFly.Retries;
@@ -11,7 +12,7 @@ public class PessimisticRetryOrchestratorTests
     [Fact]
     public void pessimistic_checks_are_always_negative()
     {
-        var retryContext = new RetryContext(0, default, default);
+        var retryContext = new RetryContext(0, DateTime.Now, default, default);
         var subject = new PessimisticRetryOrchestrator();
 
         subject.ShouldWeTryAgain(retryContext).Should().BeFalse();
@@ -20,7 +21,7 @@ public class PessimisticRetryOrchestratorTests
     [Fact]
     public void pessimistic_checks_always_return_completed_tasks()
     {
-        var retryContext = new RetryContext(0, default, default);
+        var retryContext = new RetryContext(0, DateTime.Now, default, default);
         var subject = new PessimisticRetryOrchestrator();
 
         subject.GetPrerequisiteForNextTry(retryContext).Should().Be(Task.CompletedTask);
